@@ -8,7 +8,7 @@ var LoadAndExecuteSodfunction = window.LoadAndExecuteSodfunction || function (sc
     }
 };
 
-//below function contains the constants which can be utilized just by calling the appropriate one instead of hard coding it.
+
 window.SPOUtilities = window.SPOUtilities || {};
 window.NotificationUtilities = window.NotificationUtilities || {};
 window.NotificationUtilities.Desktop = window.NotificationUtilities.Desktop || function () {
@@ -33,9 +33,12 @@ window.NotificationUtilities.Desktop = window.NotificationUtilities.Desktop || f
     }
     return { GetPermissionsAndShow: getPermissionsAndShow };
 }();
+
+//used http://adodson.com/notification.js for browser native notifications
 window.NotificationUtilities.Desktop.isNotificationsAllowed = false;
 window.NotificationUtilities.Desktop.AskPermissionIfNeeded = true;
 
+//below function contains the constants which can be utilized just by calling the appropriate one instead of hard coding it.
 window.SPOUtilities.Constants = window.SPOUtilities.Constants || function () {
     var FieldTypes = {
         Text: 'Text',
