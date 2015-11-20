@@ -1,6 +1,9 @@
 ﻿//Register Scripts which won't load By default
 RegisterSod('sp.taxonomy.js', '/_layouts/15/SP.Taxonomy.js');
 RegisterSod('sp.requestexecutor.js', '/_layouts/15/SP.RequestExecutor.js');
+RegisterSod('sp.userprofiles.js', '/_layouts/15/SP.Userprofiles.js');
+
+LoadSodByKey('sp.requestexecutor.js');
 
 var LoadAndExecuteSodfunction = window.LoadAndExecuteSodfunction || function (scriptKey, callback) {
     if (!ExecuteOrDelayUntilScriptLoaded(callback, scriptKey)) {
@@ -8,37 +11,9 @@ var LoadAndExecuteSodfunction = window.LoadAndExecuteSodfunction || function (sc
     }
 };
 
-
-window.SPOUtilities = window.SPOUtilities || {};
-window.NotificationUtilities = window.NotificationUtilities || {};
-window.NotificationUtilities.Desktop = window.NotificationUtilities.Desktop || function () {
-    var getPermissionsAndShow = function (myNotification) {
-        if (!(window.NotificationUtilities.Desktop.isNotificationsAllowed)) {
-            return;
-        }
-        if (Notify.isSupported && Notify.needsPermission && window.NotificationUtilities.Desktop.AskPermissionIfNeeded) {
-            Notify.requestPermission(onPermissionGranted, onPermissionDenied);
-        } else {
-            myNotification.show();
-        }
-
-        function onPermissionGranted() {
-            console.log('Permission has been granted by the user');
-            myNotification.show();
-        }
-
-        function onPermissionDenied() {
-            console.warn('Permission has been denied by the user');
-        }
-    }
-    return { GetPermissionsAndShow: getPermissionsAndShow };
-}();
-
-//used http://adodson.com/notification.js for browser native notifications
-window.NotificationUtilities.Desktop.isNotificationsAllowed = false;
-window.NotificationUtilities.Desktop.AskPermissionIfNeeded = true;
-
 //below function contains the constants which can be utilized just by calling the appropriate one instead of hard coding it.
+window.SPOUtilities = window.SPOUtilities || {};
+
 window.SPOUtilities.Constants = window.SPOUtilities.Constants || function () {
     var FieldTypes = {
         Text: 'Text',
@@ -68,7 +43,6 @@ var _arrayBufferToBase64 = function (buffer) {
 /**************************************CSOM Utilities *************************************/
 //Taxonomy '
 window.SPOUtilities.CSOM.Taxonomy = window.SPOUtilities.CSOM.Taxonomy || function () {
-
     //below functions gets the term names and values based on the parameters send to this function using properties.
     //Paramaters:
     // SiteUrl - current site url,
@@ -84,7 +58,6 @@ window.SPOUtilities.CSOM.Taxonomy = window.SPOUtilities.CSOM.Taxonomy || functio
                 context.load(terms);
                 context.executeQueryAsync(function () {
                     var enumer = terms.getEnumerator();
-
                     var TermValues = [];
                     while (enumer.moveNext()) {
                         var term = enumer.get_current();
@@ -114,8 +87,85 @@ window.SPOUtilities.CSOM.Taxonomy = window.SPOUtilities.CSOM.Taxonomy || functio
     };
 }();
 
+window.SPOUtilities.CSOM.Social = window.SPOUtilities.CSOM.Social || function () {
+    var _loadProfileProperties = function (props) {
+        LoadAndExecuteSodfunction('sp.js', function () {
+            LoadAndExecuteSodfunction('sp.userprofiles.js', function () {
+                var clientContext = new SP.ClientContext(props.SiteUrl);
+                var user;
 
+                if (props.UserID)
+                    user = clientContext.get_web().getUserById(props.UserID);
+                else
+                    user = clientContext.get_web().get_currentUser();
 
+                clientContext.load(user);
+                clientContext.executeQueryAsync(function () {
+                    var peopleManager = new SP.UserProfiles.PeopleManager(clientContext);
+                    if (!(props.Properties)) {
+                        props.Properties = ["FirstName", "LastName", "PictureURL", "UserName"];
+                    }
+                    var profilePropertyNames = props.Properties || ["FirstName", "LastName", "PictureURL", "UserName"];
+                    var targetUser = user.get_loginName();
+                    var userProfilePropertiesForUser =
+                        new SP.UserProfiles.UserProfilePropertiesForUser(
+                            clientContext,
+                            targetUser,
+                            profilePropertyNames);
+                    var userProfileProperties = peopleManager.getUserProfilePropertiesFor(userProfilePropertiesForUser);
+                    clientContext.load(peopleManager);
+                    clientContext.load(userProfilePropertiesForUser);
+                    clientContext.executeQueryAsync(function () {
+                        var editProfileUrl = peopleManager.get_editProfileLink();
+                        var pictureUrl = _spPageContextInfo.webAbsoluteUrl + '/_layouts/15/userphoto.aspx?accountname=' + escapeProperly(targetUser);
+                        var properties = {};
+                        for (i in props.Properties) {
+                            properties[props.Properties[i]] = userProfileProperties[i]
+                        }
+                        props.successcallback && props.successcallback({
+                            Properties: properties,
+                            editProfileURL: editProfileUrl,
+                            pictureURL: pictureUrl
+                        })
+                    }, function (s, a) {
+                        props.failurecallback && props.failurecallback(a.get_message())
+                    });
+                }, function (s, a) {
+                    props.failurecallback(a.get_message());
+                });
+            });
+        });
+    };
+    return {
+        loadProfileProperties: _loadProfileProperties
+    };
+}();
+window.SPOUtilities.CSOM.Web = window.SPOUtilities.CSOM.List || function () {
+    var _loadWebAssociatedGroups = function (props) {
+        LoadAndExecuteSodfunction('sp.js', function () {
+            var ctx = new SP.ClientContext(props.webUrl);
+            var web = ctx.get_web();
+            var membersGrp = web.get_associatedMemberGroup();
+            var ownersGroup = web.get_associatedOwnerGroup();
+            var visitorsGroup = web.get_associatedVisitorGroup()
+            ctx.load(membersGrp);
+            ctx.load(ownersGroup);
+            ctx.load(visitorsGroup);
+            ctx.executeQueryAsync(function () {
+                props.successcallback({
+                    Visitors: { id: visitorsGroup.get_id(), title: visitorsGroup.get_title() },
+                    Members: { id: membersGrp.get_id(), title: membersGrp.get_title() },
+                    Owners: { id: ownersGroup.get_id(), title: ownersGroup.get_title() }
+                });
+            }, function (s, a) {
+                props.failurrecallback(a.get_message());
+            });
+        });
+    }
+    return {
+        loadWebAssociatedGroups: _loadWebAssociatedGroups
+    }
+}();
 window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
     //below functions gets the list items based on the parameters send to this function using properties.
     //Paramaters:
@@ -139,15 +189,6 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
                     ListItems.push(currentItem.get_fieldValues());
                 }
                 if (props.successcallback && typeof (props.successcallback) === "function") {
-                    if (window.Notify) {
-                    var notification = new Notify('Items Loaded', {
-                        body: props.ListTitle + ' Items Loaded',
-                        icon: _spPageContextInfo.siteAbsoluteUrl + '/SiteAssets/Value-eXcellence/images/vx.png',
-                        timeout: 4,
-                        notifyClick: function () { window.open(); }
-                    });
-                    window.NotificationUtilities.Desktop.GetPermissionsAndShow(notification);
-                    }
                     props.successcallback(ListItems);
                 }
 
@@ -189,7 +230,7 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
         LoadAndExecuteSodfunction('sp.js', function () {
             var context = new SP.ClientContext(props.SiteUrl);
             var list = context.get_web().get_lists().getByTitle(props.ListTitle);
-            props.SelectedFields[0] = list;
+            //props.SelectedFields[0] = list;
             context.load(list);
             context.executeQueryAsync(function () {
                 props.successcallback(list);
@@ -211,7 +252,7 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
             var context = new SP.ClientContext(props.SiteUrl);
             var list = context.get_web().get_lists().getByTitle(props.ListTitle);
             var item = list.getItemById(props.ItemID);
-           // props.selectfields[0] = item;
+            // props.selectfields[0] = item;
             context.load(item);
             context.executeQueryAsync(function () {
                 props.successcallback(item.get_fieldValues());
@@ -270,12 +311,13 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
         var ctx = {};
         if (props.webUrl) {
             ctx = new SP.ClientContext(props.webUrl);
-        }
-        else {
+        } else {
             ctx = SP.ClientContext.get_current();
         }
         var list = ctx.get_web().get_lists().getByTitle(props.ListTitle);
-        var columnsTypes = {}, columnNames = [], columns = [];
+        var columnsTypes = {},
+            columnNames = [],
+            columns = [];
         if (props.FieldValues.length && props.FieldValues.length > 0) {
             var FieldValue = props.FieldValues[0];
             for (var ColumnName in FieldValue) {
@@ -283,8 +325,7 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
                     columnNames.push(ColumnName);
                 }
             }
-        }
-        else {
+        } else {
             props.successcallback('No values to save');
             return;
         }
@@ -310,15 +351,11 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
                     if (columnsTypes.hasOwnProperty(ColumnName)) {
                         if (columnsTypes[ColumnName] !== 'TaxonomyFieldType' && columnsTypes[ColumnName] !== 'URL') {
                             items[index].set_item(ColumnName, item[ColumnName]);
-                        }
-
-                        else if (columnsTypes[ColumnName] === 'TaxonomyFieldType') {
+                        } else if (columnsTypes[ColumnName] === 'TaxonomyFieldType') {
                             setTaxonomyFieldValue(ctx, list, items[index], ColumnName, item[ColumnName])
-                        }
-                        else if (columnsTypes[ColumnName] !== 'URL') {
+                        } else if (columnsTypes[ColumnName] !== 'URL') {
 
-                        }
-                        else if (columnsTypes[ColumnName] !== 'User') {
+                        } else if (columnsTypes[ColumnName] !== 'User') {
 
                         }
                     }
@@ -333,7 +370,9 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
             });
 
 
-        }, function (s, a) { deferred.reject(a.get_message()) });
+        }, function (s, a) {
+            deferred.reject(a.get_message())
+        });
 
     };
 
@@ -348,12 +387,13 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
         var ctx = {};
         if (props.webUrl) {
             ctx = new SP.ClientContext(props.webUrl);
-        }
-        else {
+        } else {
             ctx = SP.ClientContext.get_current();
         }
         var list = ctx.get_web().get_lists().getByTitle(props.ListTitle);
-        var columnsTypes = {}, columnNames = [], columns = [];
+        var columnsTypes = {},
+            columnNames = [],
+            columns = [];
         if (props.FieldValues.length && props.FieldValues.length > 0) {
             var FieldValue = props.FieldValues[0];
             for (var ColumnName in FieldValue) {
@@ -362,8 +402,7 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
                         columnNames.push(ColumnName);
                 }
             }
-        }
-        else {
+        } else {
             props.successcallback('No values to save');
             return;
         }
@@ -389,15 +428,11 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
                     if (columnsTypes.hasOwnProperty(ColumnName) && ColumnName !== 'ID') {
                         if (columnsTypes[ColumnName] !== 'TaxonomyFieldType' && columnsTypes[ColumnName] !== 'URL') {
                             items[index].set_item(ColumnName, item[ColumnName]);
-                        }
-
-                        else if (columnsTypes[ColumnName] === 'TaxonomyFieldType') {
+                        } else if (columnsTypes[ColumnName] === 'TaxonomyFieldType') {
                             setTaxonomyFieldValue(ctx, list, items[index], ColumnName, item[ColumnName])
-                        }
-                        else if (columnsTypes[ColumnName] !== 'URL') {
+                        } else if (columnsTypes[ColumnName] !== 'URL') {
 
-                        }
-                        else if (columnsTypes[ColumnName] !== 'User') {
+                        } else if (columnsTypes[ColumnName] !== 'User') {
 
                         }
                     }
@@ -413,11 +448,13 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
             });
 
 
-        }, function (s, a) { deferred.reject(a.get_message()) });
+        }, function (s, a) {
+            deferred.reject(a.get_message())
+        });
 
     };
 
-    var deleteListItems = function (props) {
+    var deleteListItem = function (props) {
         LoadAndExecuteSodfunction('sp.js', function () {
             var context = new SP.ClientContext(props.SiteUrl);
             var list = context.get_web().get_lists().getByTitle(props.ListTitle);
@@ -431,15 +468,109 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
         });
     };
 
+
+    var loadSecuritygroups = function (props) {
+        LoadAndExecuteSodfunction('sp.js', function () {
+            var context = new SP.ClientContext(props.SiteUrl);
+            var web = context.get_web();
+            var moderatorsCollection = web.get_roleAssignments().get_groups();
+            var siteGroupsCollection = web.get_siteGroups();
+            context.load(moderatorsCollection);
+            context.executeQueryAsync(function () {
+                var Securitygroups = [];
+                var Groupsenumer = moderatorsCollection.getEnumerator();
+                while (Groupsenumer.moveNext()) {
+                    var currentgroup = Groupsenumer.get_current();
+                    Securitygroups.push(currentgroup);
+                }
+                props.successcallback(Securitygroups);
+            }, function (s, a) {
+                props.failurecallback(a.get_message());
+            });
+        });
+    };
+
+    var LoadMembers = function (props) {
+        LoadAndExecuteSodfunction('sp.js', function () {
+            var context = new SP.ClientContext(props.webUrl);
+            var members = context.get_web().get_roleAssignments().get_groups().getByName(props.GroupName).get_users();
+            // var members = props.GroupName.get_users();
+            context.load(members);
+            context.executeQueryAsync(function () {
+                var enumer = members.getEnumerator();
+                var users = [];
+                while (enumer.moveNext()) {
+                    var cuser = enumer.get_current().get_objectData().get_properties();
+                    cuser.IsAdmin = false;
+                    users.push(cuser);
+                }
+                props.successcallback(users);
+            }, function (s, a) {
+                props.failurecallback(a.get_message());
+            });
+        });
+
+    };
+
+    var loadPagedItems = function (props) {
+        LoadAndExecuteSodfunction('sp.js', function () {
+            var context = new SP.ClientContext(props.SiteUrl);
+            var camlQuery = new SP.CamlQuery();
+
+            if (props.PagingInfo) {
+                var Position = new SP.ListItemCollectionPosition();
+                Position.set_pagingInfo(props.PagingInfo);
+                camlQuery.set_listItemCollectionPosition(Position);
+            }
+
+            camlQuery.set_viewXml(props.camlViewXML);
+            var List = context.get_web().get_lists().getByTitle(props.ListTitle);
+            var items = List.getItems(camlQuery);
+            context.load(items);
+            context.load(List);
+            context.executeQueryAsync(function () {
+                var enumer = items.getEnumerator();
+                var ListItems = [];
+                while (enumer.moveNext()) {
+                    var currentItem = enumer.get_current();
+                    ListItems.push(currentItem.get_fieldValues());
+                }
+                if (props.successcallback && typeof (props.successcallback) === "function") {
+                    var nextPagingInfo, prevPagingInfo
+                    if (items && items.get_listItemCollectionPosition()) {
+                        nextPagingInfo = items.get_listItemCollectionPosition().get_pagingInfo();
+                    } else {
+                        nextPagingInfo = null;
+                    }
+
+                    if (items && items.get_count() > 0) {
+                        prevPagingInfo = "PagedPrev=TRUE&Paged=TRUE&p_ID=" + items.itemAt(0).get_item('ID') + "&p_" + props.SortColumn + "=" + encodeURIComponent(items.itemAt(0).get_item(props.SortColumn).get_lookupValue());
+                    }
+
+                    props.successcallback({ listitems: ListItems, prevPagingInfo: prevPagingInfo, nextPagingInfo: nextPagingInfo });
+                }
+
+            }, function (s, a) {
+                if (props.failurecallback && typeof (props.failurecallback) === "function") {
+                    props.failurecallback(a.get_message());
+                }
+            });
+        });
+    };
+
+
     return {
         addListItems: addListItems,
         updateListItems: updateListItems,
-        deleteListItems: deleteListItems,
+        deleteListItem: deleteListItem,
         loadItems: loadItems,
         loadItem: loadItem,
         getIconUrl: getIconUrl,
         loadList: loadList,
-        loadContentTypes: loadContentTypes
+        loadContentTypes: loadContentTypes,
+        loadSecuritygroups: loadSecuritygroups,
+        LoadMembers: LoadMembers,
+        loadPagedItems: loadPagedItems
     };
 }();
 
@@ -467,7 +598,7 @@ window.SPOUtilities.REST.List = window.SPOUtilities.REST.List || function () {
             url = url + '&$filter=' + props.FilterCondition;
         }
         if (props.SortCondition && props.SortCondition.trim() !== "") {
-            url = url + '&$orderby=' + props.FilterCondition;
+            url = url + '&$orderby=' + props.SortCondition;
         }
         if (props.Limit && props.Limit > 0) {
             url = url + '&$top=' + props.Limit;
@@ -523,9 +654,37 @@ window.SPOUtilities.REST.List = window.SPOUtilities.REST.List || function () {
 
     };
 
+    var loadList = function (props) {
+        var url = props.SiteUrl + '/_api/web/lists/GetByTitle(\'' + props.ListTitle + '\')';
+        var info = {
+            url: url,
+            method: "GET",
+            headers: {
+                "Accept": "application/json; odata=verbose"
+            },
+            success: function (data) {
+
+                var jsonObject = JSON.parse(data.body);
+                if (props.successcallback && typeof (props.successcallback) === "function") {
+                    props.successcallback(jsonObject.d);
+                }
+            },
+            error: function (sender, args, errMsg) {
+                props.failurecallback(errMsg);
+            }
+        };
+
+
+
+        LoadAndExecuteSodfunction('sp.requestexecutor.js', function () {
+            var executor = new SP.RequestExecutor(props.SiteUrl);
+            executor.executeAsync(info);
+        });
+    }
 
     return {
         loadItems: loadItems,
+        loadList: loadList,
         loadfileByUrl: loadfileByUrl
     };
 }();
@@ -661,10 +820,218 @@ window.SPOUtilities.REST.Library = window.SPOUtilities.REST.Library || function 
 
     };
 
-    
+    //below functions Used to replaceFile the file in the library, on the parameters send to this function using properties.
+    //Paramaters:
+    // SiteUrl - current site collection url,
+    //webUrl - current site url
+    //fileUrl - URL of the file to Checkout
+    //checkoutRequired - Check flag for the Check out required or not for the file to edit
+    // Successcallback  - success callback that takes response as parameter, failure call back.
+    //failurecallback - failure call that takes parameter as error message
+    var replaceFile = function (props) {
+        var checkoutprops = {};
+        checkoutprops.webUrl = props.webUrl;
+        checkoutprops.siteUrl = props.siteUrl;
+        checkoutprops.fileUrl = props.fileUrl;
+        checkoutprops.successcallback = function (cdata) {
+            uploadFile(props);
+        }
+        checkoutprops.failurecallback = function (cdata) {
+            props.failurecallback(cdata);
+        }
+        if (props.checkoutRequired)
+            checkOutFile(checkoutprops);
+        else uploadFile(props);
+    };
     return {
         uploadFile: uploadFile,
+        replaceFile: replaceFile,
         checkInFile: checkInFile,
         checkOutFile: checkOutFile
     };
 }();
+
+
+window.SPOUtilities.REST.Social = window.SPOUtilities.REST.Social || function () {
+    var _LoadIsFollowedContent = function (props) {
+        var info = {
+            url: props.siteUrl + '/_api/social.following/isfollowed',
+            method: "POST",
+            body: JSON.stringify({
+                "actor": {
+                    "__metadata": {
+                        "type": "SP.Social.SocialActorInfo"
+                    },
+                    "ActorType": props.actortype,
+                    "ContentUri": props.documentOrSiteUrl,
+                    "Id": null
+                }
+            }),
+            headers: {
+                "accept": "application/json;odata=verbose",
+                "content-type": "application/json;odata=verbose"
+            },
+            success: function (responseData) {
+                props.successcallback(responseData);
+            },
+            error: function (s, a, errMsg) {
+                props.failurecallback(s, a, errMsg);
+            }
+        };
+
+        LoadAndExecuteSodFunction('sp.requestexecutor.js', function () {
+            var executor = new SP.RequestExecutor(props.siteUrl);
+            executor.executeAsync(info);
+        });
+    };
+    var _ToggleFollowContent = function (props) {
+
+        var url = '';
+        if (props.IsFollowed) {
+            url = props.siteUrl + '/_api/social.following/stopfollowing'
+        }
+        else {
+            url = props.siteUrl + '/_api/social.following/follow'
+        }
+        var info = {
+            url: url,
+            method: "POST",
+            body: JSON.stringify({
+                "actor": {
+                    "__metadata": {
+                        "type": "SP.Social.SocialActorInfo"
+                    },
+                    "ActorType": props.actortype,
+                    "ContentUri": props.documentOrSiteUrl,
+                    "Id": null
+                }
+            }),
+            headers: {
+                "accept": "application/json;odata=verbose",
+                "content-type": "application/json;odata=verbose"
+            },
+            success: function (responseData) {
+                props.successcallback(responseData);
+            },
+            error: function (s, a, errMsg) {
+                props.failurecallback(s, a, errMsg);
+            }
+        };
+        LoadAndExecuteSodFunction('sp.requestexecutor.js', function () {
+            var executor = new SP.RequestExecutor(props.siteUrl);
+            executor.executeAsync(info);
+        });
+    };
+    var _LoadIsFollowedUser = function (props) {
+        var info = {
+            url: props.siteUrl + '/_api/social.following/isfollowed',
+            method: "POST",
+            body: JSON.stringify({
+                "actor": {
+                    "__metadata": {
+                        "type": "SP.Social.SocialActorInfo"
+                    },
+                    "ActorType": props.actortype,
+                    "AccountName": props.accountname,
+                    "Id": null
+                }
+            }),
+            headers: {
+                "accept": "application/json;odata=verbose",
+                "content-type": "application/json;odata=verbose"
+            },
+            success: function (responseData) {
+                props.successcallback(responseData);
+            },
+            error: function (s, a, errMsg) {
+                props.failurecallbaack(s, a, errMsg);
+            }
+        };
+
+        LoadAndExecuteSodFunction('sp.requestexecutor.js', function () {
+            var executor = new SP.RequestExecutor(props.siteUrl);
+            executor.executeAsync(info);
+        });
+    };
+    var _ToggleFollowUser = function (props) {
+
+        var url = '';
+        if (props.IsFollowed) {
+            url = props.siteUrl + '/_api/social.following/stopfollowing'
+        }
+        else {
+            url = props.siteUrl + '/_api/social.following/follow'
+        }
+        var info = {
+            url: url,
+            method: "POST",
+            body: JSON.stringify({
+                "actor": {
+                    "__metadata": {
+                        "type": "SP.Social.SocialActorInfo"
+                    },
+                    "ActorType": props.actortype,
+                    "AccountName": props.accountname,
+                    "Id": null
+                }
+            }),
+            headers: {
+                "accept": "application/json;odata=verbose",
+                "content-type": "application/json;odata=verbose"
+            },
+            success: function (responseData) {
+                props.successcallback(responseData);
+            },
+            error: function (s, a, errMsg) {
+                props.failurecallback(s, a, errMsg);
+            }
+        };
+        LoadAndExecuteSodFunction('sp.requestexecutor.js', function () {
+            var executor = new SP.RequestExecutor(props.siteUrl);
+            executor.executeAsync(info);
+        });
+    };
+    var _LoadFollowedContent = function (props) {
+        LoadAndExecuteSodfunction('sp.requestexecutor.js', function () {
+            var requestinfo = {
+                url: props.SiteUrl + "/_api/social.following/my/followed(types=" + props.Type + ")",
+                method: "GET",
+                headers: {
+                    "Accept": "application/json; odata=verbose",
+                    "content-type": "application/json; odata=verbose"
+                },
+                success: function (data) {
+                    var content = JSON.parse(data.body).d.Followed.results;
+                    props.successcallback && props.successcallback(content);
+                },
+                error: function (s, a, errMsg) {
+                    props.failurecallback && props.failurecallback(errMsg)
+                }
+            };
+            var executor = new SP.RequestExecutor(props.SiteUrl);
+            executor.executeAsync(requestinfo);
+        });
+    };
+
+    return {
+        LoadIsFollowedContent: LoadIsFollowedContent,
+        ToggleFollowContent: ToggleFollowContent,
+        LoadIsFollowedUser: _LoadIsFollowedUser,
+        ToggleFollowUser: _ToggleFollowUser,
+        LoadFollowedContent: _LoadFollowedContent
+    };
+
+
+
+}();
+
+
+
+
+
+
+
+
+
+
+
