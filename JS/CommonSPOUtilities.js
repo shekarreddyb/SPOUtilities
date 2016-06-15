@@ -1074,7 +1074,7 @@ window.SPOUtilities.REST.Social = window.SPOUtilities.REST.Social || function ()
         ToggleFollowContent: _ToggleFollowContent,
         LoadIsFollowedUser: _LoadIsFollowedUser,
         ToggleFollowUser: _ToggleFollowUser,
-        LoadFollowedContent: _LoadFollowedContent
+        LoadFollowedContent: _LoadFollowedContent 
     };
 }();
 
