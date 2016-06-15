@@ -20,6 +20,7 @@ window.SPOUtilities.Constants = window.SPOUtilities.Constants || function () {
         Number: 'Number',
         Choice: 'Choice',
         TaxonomyFieldType: 'TaxonomyFieldType',
+        TaxonomyFieldTypeMulti: 'TaxonomyFieldTypeMulti',
         Boolean: '',
         Computed: '',
         DateTime: ''
@@ -231,7 +232,12 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
             var context = new SP.ClientContext(props.SiteUrl);
             var list = context.get_web().get_lists().getByTitle(props.ListTitle);
             //props.SelectedFields[0] = list;
-            context.load(list);
+            if (props.SelectedProperties.length > 0) {
+                context.load(list, props.SelectedProperties);
+            }
+            else {
+                context.load(list, props.SelectedProperties);
+            }
             context.executeQueryAsync(function () {
                 props.successcallback(list);
             }, function (s, a) {
@@ -300,6 +306,43 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
         TypedTaxColumn.setFieldValueByValue(item, newTaxValue);
     };
 
+    var setTaxonomyFieldMultiValue = function (context, list, item, columnName, TaxonomyValue) {
+        var taxColumn = list.get_fields().getByInternalNameOrTitle(columnName);
+        var TypedTaxColumn = context.castTo(taxColumn, SP.Taxonomy.TaxonomyField);
+
+
+        var terms = new Array();
+
+        for (var i = 0; i < TaxonomyValue.length; i++) {
+            terms.push("-1;#" + TaxonomyValue[i].label + "|" + TaxonomyValue[i].ID);
+        }
+
+        var termValueString = terms.join(";#");
+        var termValues = new SP.Taxonomy.TaxonomyFieldValueCollection(context, termValueString, TypedTaxColumn);
+        TypedTaxColumn.setFieldValueByValueCollection(item, termValues);
+    };
+
+    var setUserFieldValue = function (item, userValue, columnName) {
+        debugger;
+        var users = [];
+        if (typeof (userValue) === 'object' && userValue.length > 0) {
+            for (var i = 0; i < userValue.length; i++) {
+                var userFld = new SP.FieldUserValue();
+                userFld.set_lookupId(userValue[i].id);
+                users.push(userFld);
+            }
+        }
+
+        item.set_item(columnName, users);
+    };
+
+    var setUrlFieldValue = function (item, urlValue, columnName) {
+        var hyperLink = new SP.FieldUrlValue();
+        hyperLink.set_url(urlValue.url);
+        hyperLink.set_description(urlValue.desc);
+        item.set_item(columnName, hyperLink);
+    };
+
     //below functions adds the list item in a list on the parameters send to this function using properties.
     //Paramaters:
     // webUrl - current site url,
@@ -334,46 +377,53 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
             columns[index] = list.get_fields().getByInternalNameOrTitle(columnName);
             ctx.load(columns[index]);
         });
+        LoadAndExecuteSodfunction('sp.taxonomy.js', function () {
+            ctx.executeQueryAsync(function () {
+                $.each(columnNames, function (index, columnName) {
+                    columnsTypes[columnName] = columns[index].get_typeAsString();
+                });
+                // save all items to list at a time
+                var items = [];
+                $.each(props.FieldValues, function (index, item) {
+                    var newItemCreateInfo = new SP.ListItemCreationInformation();
+                    var newListItem = list.addItem(newItemCreateInfo);
+                    items[index] = newListItem;
 
-        ctx.executeQueryAsync(function () {
-            $.each(columnNames, function (index, columnName) {
-                columnsTypes[columnName] = columns[index].get_typeAsString();
-            });
-            // save all items to list at a time
-            var items = [];
-            $.each(props.FieldValues, function (index, item) {
-                var newItemCreateInfo = new SP.ListItemCreationInformation();
-                var newListItem = list.addItem(newItemCreateInfo);
-                items[index] = newListItem;
-
-                //assign each column property
-                for (var ColumnName in columnsTypes) {
-                    if (columnsTypes.hasOwnProperty(ColumnName)) {
-                        if (columnsTypes[ColumnName] !== 'TaxonomyFieldType' && columnsTypes[ColumnName] !== 'URL') {
-                            items[index].set_item(ColumnName, item[ColumnName]);
-                        } else if (columnsTypes[ColumnName] === 'TaxonomyFieldType') {
-                            setTaxonomyFieldValue(ctx, list, items[index], ColumnName, item[ColumnName])
-                        } else if (columnsTypes[ColumnName] !== 'URL') {
-
-                        } else if (columnsTypes[ColumnName] !== 'User') {
-
+                    //assign each column property
+                    for (var ColumnName in columnsTypes) {
+                        if (columnsTypes.hasOwnProperty(ColumnName)) {
+                            if (columnsTypes[ColumnName] !== 'TaxonomyFieldType' && columnsTypes[ColumnName] !== 'TaxonomyFieldTypeMulti' && columnsTypes[ColumnName] !== 'URL') {
+                                items[index].set_item(ColumnName, item[ColumnName]);
+                            }
+                            else if (columnsTypes[ColumnName] === 'TaxonomyFieldType') {
+                                setTaxonomyFieldValue(ctx, list, items[index], ColumnName, item[ColumnName])
+                            }
+                            else if (columnsTypes[ColumnName] === 'TaxonomyFieldTypeMulti') {
+                                setTaxonomyFieldMultiValue(ctx, list, items[index], ColumnName, item[ColumnName])
+                            }
+                            else if (columnsTypes[ColumnName] === 'URL') {
+                                setUrlFieldValue(items[index], item[ColumnName], ColumnName);
+                            } else if (columnsTypes[ColumnName] === 'User') {
+                                setUserFieldValue(items[index], item[ColumnName], ColumnName);
+                            }
                         }
                     }
-                }
-                items[index].update();
-            });
+                    items[index].update();
+                });
 
-            ctx.executeQueryAsync(function () {
-                props.successcallback(items);
+
+                ctx.executeQueryAsync(function () {
+                    props.successcallback(items);
+                }, function (s, a) {
+                    props.failurecallback(a.get_message());
+                });
+
+
+
             }, function (s, a) {
                 props.failurecallback(a.get_message());
             });
-
-
-        }, function (s, a) {
-            deferred.reject(a.get_message())
         });
-
     };
 
     //below functions updates the list item on the parameters send to this function using properties.
@@ -412,44 +462,50 @@ window.SPOUtilities.CSOM.List = window.SPOUtilities.CSOM.List || function () {
             ctx.load(columns[index]);
         });
 
-        ctx.executeQueryAsync(function () {
-            $.each(columnNames, function (index, columnName) {
-                columnsTypes[columnName] = columns[index].get_typeAsString();
-            });
-            // save all items to list at a time
-            var items = [];
-            $.each(props.FieldValues, function (index, item) {
-                // var newItemCreateInfo = new SP.ListItemCreationInformation();
-                var listItemToUpdate = list.getItemById(item.ID);
-                items[index] = listItemToUpdate;
+        LoadAndExecuteSodfunction('sp.taxonomy.js', function () {
+            ctx.executeQueryAsync(function () {
+                $.each(columnNames, function (index, columnName) {
+                    columnsTypes[columnName] = columns[index].get_typeAsString();
+                });
+                // save all items to list at a time
+                var items = [];
+                $.each(props.FieldValues, function (index, item) {
+                    // var newItemCreateInfo = new SP.ListItemCreationInformation();
+                    var listItemToUpdate = list.getItemById(item.ID);
+                    items[index] = listItemToUpdate;
 
-                //assign each column property
-                for (var ColumnName in columnsTypes) {
-                    if (columnsTypes.hasOwnProperty(ColumnName) && ColumnName !== 'ID') {
-                        if (columnsTypes[ColumnName] !== 'TaxonomyFieldType' && columnsTypes[ColumnName] !== 'URL') {
-                            items[index].set_item(ColumnName, item[ColumnName]);
-                        } else if (columnsTypes[ColumnName] === 'TaxonomyFieldType') {
-                            setTaxonomyFieldValue(ctx, list, items[index], ColumnName, item[ColumnName])
-                        } else if (columnsTypes[ColumnName] !== 'URL') {
-
-                        } else if (columnsTypes[ColumnName] !== 'User') {
-
+                    //assign each column property
+                    for (var ColumnName in columnsTypes) {
+                        if (columnsTypes.hasOwnProperty(ColumnName) && ColumnName !== 'ID') {
+                            if (columnsTypes[ColumnName] !== 'TaxonomyFieldType' && columnsTypes[ColumnName] !== 'TaxonomyFieldTypeMulti' && columnsTypes[ColumnName] !== 'URL') {
+                                items[index].set_item(ColumnName, item[ColumnName]);
+                            } else if (columnsTypes[ColumnName] === 'TaxonomyFieldType') {
+                                setTaxonomyFieldValue(ctx, list, items[index], ColumnName, item[ColumnName])
+                            }
+                            else if (columnsTypes[ColumnName] === 'TaxonomyFieldTypeMulti') {
+                                setTaxonomyFieldMultiValue(ctx, list, items[index], ColumnName, item[ColumnName])
+                            }
+                            else if (columnsTypes[ColumnName] === 'URL') {
+                                setUrlFieldValue(items[index], item[ColumnName], ColumnName);
+                            } else if (columnsTypes[ColumnName] === 'User') {
+                                setUserFieldValue(items[index], item[ColumnName], ColumnName);
+                            }
                         }
                     }
-                }
-                items[index].update();
-                ctx.load(items[index]);
-            });
+                    items[index].update();
+                    ctx.load(items[index]);
+                });
 
-            ctx.executeQueryAsync(function () {
-                props.successcallback(items);
+
+                ctx.executeQueryAsync(function () {
+                    props.successcallback(items);
+                }, function (s, a) {
+                    props.failurecallback(a.get_message());
+                });
+
             }, function (s, a) {
                 props.failurecallback(a.get_message());
             });
-
-
-        }, function (s, a) {
-            deferred.reject(a.get_message())
         });
 
     };
@@ -1014,15 +1070,12 @@ window.SPOUtilities.REST.Social = window.SPOUtilities.REST.Social || function ()
     };
 
     return {
-        LoadIsFollowedContent: LoadIsFollowedContent,
-        ToggleFollowContent: ToggleFollowContent,
+        LoadIsFollowedContent: _LoadIsFollowedContent,
+        ToggleFollowContent: _ToggleFollowContent,
         LoadIsFollowedUser: _LoadIsFollowedUser,
         ToggleFollowUser: _ToggleFollowUser,
         LoadFollowedContent: _LoadFollowedContent
     };
-
-
-
 }();
 
 
